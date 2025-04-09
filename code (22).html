@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D People Plotter - Supabase</title>
+    <style>
+        /* --- Styles --- */
+        :root {
+            --bg-color: #1a1a1a; --text-color: #e0e0e0; --input-bg: #2a2a2a; --border-color: #444; --primary-accent: #00bcd4; --secondary-accent: #ff4081; --list-item-bg: #252525; --list-item-hover: #333; --error-color: #ff6b6b; --splitter-color: #555; --splitter-hover-color: var(--primary-accent); --axis-x-color: #ff3333; --axis-y-color: #33ff33; --axis-z-color: #3333ff; --disabled-color: #777;
+        }
+        html { height: 100%; box-sizing: border-box; } *, *:before, *:after { box-sizing: inherit; }
+        body { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg-color); color: var(--text-color); overflow: hidden; display: flex; }
+        #main-container { display: flex; flex-direction: column; flex-grow: 1; padding: 10px; min-height: 0; }
+        #controls-area, #graph-container, #list-container { border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; }
+        #controls-area { flex: 0 0 auto; max-height: 40%; overflow-y: auto; padding: 15px; background-color: var(--input-bg); margin-bottom: 5px; }
+        #graph-container { flex: 1 1 55%; min-height: 150px; position: relative; background-color: #000; }
+        #list-container { flex: 1 1 30%; min-height: 80px; background-color: var(--input-bg); margin-top: 5px; padding-top: 0; display: flex; flex-direction: column; }
+        #controls-content { display: flex; gap: 20px; flex-wrap: wrap; }
+        .control-section { display: flex; flex-direction: column; gap: 10px; min-width: 200px; }
+        .control-section h3 { margin: 0 0 10px 0; padding-bottom: 5px; border-bottom: 1px solid var(--border-color); font-size: 1.1em; color: var(--primary-accent); }
+        label { display: block; margin-bottom: 3px; font-size: 0.9em; }
+        input[type="text"], input[type="number"] { padding: 8px 10px; background-color: #333; border: 1px solid var(--border-color); color: var(--text-color); border-radius: 4px; width: 150px; } input[type="number"] { width: 80px; }
+        input::placeholder { color: #888; } input:focus { outline: none; border-color: var(--primary-accent); } input.invalid { border-color: var(--error-color); }
+        button { padding: 10px 15px; background-color: var(--primary-accent); color: #fff; border: none; border-radius: 4px; cursor: pointer; transition: background-color 0.2s ease; font-weight: bold; } button:hover { background-color: #0097a7; } button.secondary { background-color: var(--secondary-accent); } button.secondary:hover { background-color: #e00070; }
+        button:disabled { background-color: var(--disabled-color); color: #bbb; cursor: not-allowed; }
+        #add-error { color: var(--error-color); font-size: 0.8em; min-height: 1.2em; }
+        #list-container .list-header { padding: 8px 15px; background-color: var(--input-bg); border-bottom: 1px solid var(--border-color); flex-shrink: 0; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 1fr; gap: 10px; align-items: center; font-weight: bold; color: var(--primary-accent); }
+        #list-scroll-area { flex-grow: 1; overflow-y: auto; padding: 0 10px 10px 10px; min-height: 0; }
+        .list-item { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr 1fr; gap: 10px; align-items: center; padding: 8px 5px; border-bottom: 1px solid var(--border-color); } .list-item:last-child { border-bottom: none; } .list-item:hover { background-color: var(--list-item-hover); }
+        .list-item span, .list-item input { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .list-item input[type="text"], .list-item input[type="number"] { width: 90%; padding: 4px 6px; font-size: 0.9em; } .list-item .actions { display: flex; gap: 5px; justify-content: flex-end; } .list-item .actions button { padding: 4px 8px; font-size: 0.8em; }
+        .list-name-color-swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; border: 1px solid rgba(255,255,255,0.2); vertical-align: middle; }
+        .axis-label { position: absolute; color: white; font-size: 14px; font-weight: bold; text-shadow: 1px 1px 2px black; pointer-events: none; }
+        .splitter { height: 5px; background-color: var(--splitter-color); cursor: ns-resize; flex-shrink: 0; transition: background-color 0.2s ease; z-index: 50; } .splitter:hover { background-color: var(--splitter-hover-color); }
+        /* Loading Overlay */
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); color: white; display: flex; justify-content: center; align-items: center; font-size: 1.5em; z-index: 1000; display: none; /* Hidden initially */ }
+        /* Error Message Style */
+        #error-message-container { position: fixed; top: 0; left: 0; width: 100%; padding: 10px; background-color: var(--error-color); color: white; text-align: center; font-weight: bold; z-index: 1001; display: none; /* Hidden initially */ }
+    </style>
+</head>
+<body>
+    <div id="loading-overlay">Loading...</div>
+    <div id="error-message-container"></div> <!-- Container for startup error message -->
+
+    <div id="main-container">
+        <div id="controls-area" data-min-height="100">
+             <div id="controls-content">
+                 <div id="add-person-section" class="control-section">
+                    <h3>Add New Person</h3>
+                    <div><label for="person-name">Name:</label><input type="text" id="person-name" placeholder="Enter name"></div>
+                    <div id="score-inputs"></div>
+                    <button id="add-person-btn">Add Person</button><span id="add-error"></span>
+                </div>
+                 <div id="edit-traits-section" class="control-section">
+                    <h3>Edit Trait Names</h3>
+                    <div><label for="trait-x-name">X-Axis:</label><input type="text" id="trait-x-name" value="Zestiness"></div>
+                    <div><label for="trait-y-name">Y-Axis:</label><input type="text" id="trait-y-name" value="Blessedness"></div>
+                    <div><label for="trait-z-name">Z-Axis:</label><input type="text" id="trait-z-name" value="Autism"></div>
+                    <button id="update-traits-btn">Update Trait Names</button>
+                </div>
+             </div>
+        </div>
+
+        <div class="splitter" id="splitter-1"></div>
+        <div id="graph-container" data-min-height="150"></div>
+        <div class="splitter" id="splitter-2"></div>
+
+        <div id="list-container" data-min-height="80">
+            <div class="list-header"><span>Name</span><span id="list-header-x">Zestiness</span><span id="list-header-y">Blessedness</span><span id="list-header-z">Autism</span><span>Actions</span></div>
+            <div id="list-scroll-area"><div id="people-list"></div></div>
+        </div>
+    </div>
+
+    <!-- External Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- SUPABASE JS CLIENT -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@^1.0.0"></script>
+
+    <script>
+        // --- Supabase Config ---
+        const SUPABASE_URL = 'https://ipsomtvwiutmekhuxska.supabase.co'; // Keep your actual URL
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlwc29tdHZ3aXV0bWVraHV4c2thIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQyMzQ2NzYsImV4cCI6MjA1OTgxMDY3Nn0.dByPl2-flrsYAWIbohg7PgVqSMy6rbe8f0Z73y3hdxk'; // Keep your actual key
+
+        // --- Initialize Supabase Client ---
+        // Declare variable accessible by the DOMContentLoaded listener
+        let supabase;
+
+        try {
+            // Use the *global* supabase object provided by the CDN script (window.supabase).
+            // Assign the *result* (the initialized client) to our local variable.
+            if (window.supabase && typeof window.supabase.createClient === 'function') {
+                supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                console.log("Supabase client initialized successfully.");
+            } else {
+                throw new Error("Supabase library (window.supabase.createClient) not loaded or found.");
+            }
+        } catch (error) {
+            console.error("Fatal Error Initializing Supabase:", error);
+            // Display error prominently if initialization fails fundamentally
+             // Use setTimeout to ensure the DOM element might exist *briefly*
+            setTimeout(() => {
+                const errorDiv = document.getElementById('error-message-container');
+                if (errorDiv) {
+                     errorDiv.textContent = `Fatal Error: Could not initialize database connection. ${error.message || error}`;
+                     errorDiv.style.display = 'block';
+                 }
+                const mainDiv = document.getElementById('main-container');
+                if(mainDiv) {
+                    mainDiv.style.display = 'none'; // Hide main app
+                }
+            }, 0);
+        }
+
+        // --- Wait for DOM to load before accessing elements ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- DOM References (Safe to get now) ---
+            const loadingOverlay = document.getElementById('loading-overlay');
+            const errorMessageContainer = document.getElementById('error-message-container');
+            const mainContainer = document.getElementById('main-container');
+            const controlsArea = document.getElementById('controls-area');
+            const graphContainer = document.getElementById('graph-container');
+            const listContainer = document.getElementById('list-container');
+            const splitter1 = document.getElementById('splitter-1');
+            const splitter2 = document.getElementById('splitter-2');
+            const personNameInput = document.getElementById('person-name');
+            const scoreInputsContainer = document.getElementById('score-inputs');
+            const addPersonBtn = document.getElementById('add-person-btn');
+            const addErrorSpan = document.getElementById('add-error');
+            const traitXInput = document.getElementById('trait-x-name');
+            const traitYInput = document.getElementById('trait-y-name');
+            const traitZInput = document.getElementById('trait-z-name');
+            const updateTraitsBtn = document.getElementById('update-traits-btn');
+            const listScrollArea = document.getElementById('list-scroll-area');
+            const peopleListDiv = document.getElementById('people-list');
+            const listHeaderX = document.getElementById('list-header-x');
+            const listHeaderY = document.getElementById('list-header-y');
+            const listHeaderZ = document.getElementById('list-header-z');
+
+            // --- UI Helper ---
+            function setLoading(isLoading) {
+                // Check if elements exist before trying to modify them
+                 if (!loadingOverlay || !addPersonBtn || !updateTraitsBtn || !peopleListDiv) {
+                    // console.warn("setLoading: Required DOM elements not found (might be during initial error).");
+                    return;
+                 }
+                loadingOverlay.style.display = isLoading ? 'flex' : 'none';
+                 addPersonBtn.disabled = isLoading;
+                 updateTraitsBtn.disabled = isLoading;
+                 // Disable buttons within the list
+                peopleListDiv.querySelectorAll('button').forEach(btn => btn.disabled = isLoading);
+            }
+
+            // --- Check Supabase Client Again (Essential) ---
+            if (!supabase) {
+                console.error("Supabase client not available. Aborting app setup inside DOMContentLoaded.");
+                 // Attempt to show error message cleanly
+                 if(errorMessageContainer) { // Check if container exists
+                    errorMessageContainer.textContent = 'Database connection failed. Application cannot start.';
+                     errorMessageContainer.style.display = 'block';
+                }
+                if(mainContainer) mainContainer.style.display = 'none'; // Hide main app area
+                if(loadingOverlay) loadingOverlay.style.display = 'none'; // Ensure loading is hidden
+                return; // Stop execution of the rest of the setup
+            }
+
+             // --- Global State ---
+            let people = [];
+            let traitNames = { x: 'Zestiness', y: 'Blessedness', z: 'Autism' };
+            const scoreMin = 0; const scoreMax = 100;
+
+            // --- Three.js Setup (unchanged code - assuming no errors within these functions) ---
+            let scene, camera, renderer, controls, peopleGroup, axesGroup;
+            const pointSize = 2.0; const labelOffset = new THREE.Vector3(0, pointSize + 1.0, 0); const axisLength = scoreMax * 1.1;
+             function init3D() { scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000); camera = new THREE.PerspectiveCamera(75, graphContainer.clientWidth / graphContainer.clientHeight, 0.1, 1000); camera.position.set(scoreMax * 0.8, scoreMax * 0.6, scoreMax * 1.1); renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(graphContainer.clientWidth, graphContainer.clientHeight); graphContainer.appendChild(renderer.domElement); controls = new THREE.OrbitControls(camera, renderer.domElement); controls.enableDamping = true; controls.dampingFactor = 0.05; controls.target.set(scoreMax / 2, scoreMax / 2, scoreMax / 2); const ambientLight = new THREE.AmbientLight(0xffffff, 0.7); scene.add(ambientLight); const directionalLight = new THREE.DirectionalLight(0xffffff, 0.9); directionalLight.position.set(50, 100, 75); scene.add(directionalLight); peopleGroup = new THREE.Group(); scene.add(peopleGroup); axesGroup = new THREE.Group(); scene.add(axesGroup); createAxes(); window.addEventListener('resize', onWindowResize, false); animate(); }
+             function createAxes() { axesGroup.clear(); const existingLabels = graphContainer.querySelectorAll('.axis-label'); existingLabels.forEach(label => label.remove()); const origin = new THREE.Vector3(0, 0, 0); const lineMatParams = { linewidth: 2 }; const axisMaterialX = new THREE.LineBasicMaterial({ color: 0xff3333, ...lineMatParams }); const geometryX = new THREE.BufferGeometry().setFromPoints([origin, new THREE.Vector3(axisLength, 0, 0)]); axesGroup.add(new THREE.Line(geometryX, axisMaterialX)); createAxisLabel(traitNames.x, new THREE.Vector3(axisLength + 5, 0, 0), 'var(--axis-x-color)'); const axisMaterialY = new THREE.LineBasicMaterial({ color: 0x33ff33, ...lineMatParams }); const geometryY = new THREE.BufferGeometry().setFromPoints([origin, new THREE.Vector3(0, axisLength, 0)]); axesGroup.add(new THREE.Line(geometryY, axisMaterialY)); createAxisLabel(traitNames.y, new THREE.Vector3(0, axisLength + 5, 0), 'var(--axis-y-color)'); const axisMaterialZ = new THREE.LineBasicMaterial({ color: 0x3333ff, ...lineMatParams }); const geometryZ = new THREE.BufferGeometry().setFromPoints([origin, new THREE.Vector3(0, 0, axisLength)]); axesGroup.add(new THREE.Line(geometryZ, axisMaterialZ)); createAxisLabel(traitNames.z, new THREE.Vector3(0, 0, axisLength + 5), 'var(--axis-z-color)'); }
+             function createAxisLabel(text, position, color) { const labelDiv = document.createElement('div'); labelDiv.className = 'axis-label'; labelDiv.textContent = text; labelDiv.style.color = color; labelDiv.userData = { position: position.clone() }; graphContainer.appendChild(labelDiv); }
+             function updateAxisLabelPositions() { const labels = graphContainer.querySelectorAll('.axis-label'); if (!camera || !graphContainer.clientWidth) return; const width = graphContainer.clientWidth; const height = graphContainer.clientHeight; const widthHalf = width / 2; const heightHalf = height / 2; labels.forEach(label => { if (!label.userData || !label.userData.position) return; const position3D = label.userData.position; const vector = position3D.clone().project(camera); label.style.left = `${(vector.x * widthHalf) + widthHalf}px`; label.style.top = `${-(vector.y * heightHalf) + heightHalf}px`; label.style.display = vector.z > 1 ? 'none' : 'block'; }); }
+             function getRgbFromScores(scores) { const r = Math.max(0, Math.min(255, Math.round((scores.x / scoreMax) * 255))); const g = Math.max(0, Math.min(255, Math.round((scores.y / scoreMax) * 255))); const b = Math.max(0, Math.min(255, Math.round((scores.z / scoreMax) * 255))); return { r, g, b }; }
+             function getCssColorFromScores(scores) { const { r, g, b } = getRgbFromScores(scores); return `rgb(${r}, ${g}, ${b})`; }
+             function getThreeColorFromScores(scores) { const r = Math.max(0, Math.min(1, scores.x / scoreMax)); const g = Math.max(0, Math.min(1, scores.y / scoreMax)); const b = Math.max(0, Math.min(1, scores.z / scoreMax)); return new THREE.Color(r, g, b); }
+             function createPersonPoint(person) { const pointColor = getThreeColorFromScores(person.scores); const labelColorCss = getCssColorFromScores(person.scores); const geometry = new THREE.SphereGeometry(pointSize, 16, 16); const material = new THREE.MeshPhongMaterial({ color: pointColor, emissive: pointColor, emissiveIntensity: 0.3 }); const mesh = new THREE.Mesh(geometry, material); mesh.position.set(person.scores.x, person.scores.y, person.scores.z); mesh.userData = { id: person.id, type: 'point' }; peopleGroup.add(mesh); const label = createLabelSprite(person.name, labelColorCss); label.position.copy(mesh.position).add(labelOffset); label.userData = { id: person.id, type: 'label' }; peopleGroup.add(label); }
+             function createLabelSprite(text, textColorCss) { const canvas = document.createElement('canvas'); const context = canvas.getContext('2d'); const fontSize = 24; const fontWeight = 'bold'; const padding = 5; const outlineColor = 'rgba(0, 0, 0, 0.7)'; const outlineWidth = 2; context.font = `${fontWeight} ${fontSize}px Arial`; const textWidth = context.measureText(text).width; canvas.width = textWidth + (padding * 2) + (outlineWidth * 2); canvas.height = fontSize + (padding * 2) + (outlineWidth * 2); context.font = `${fontWeight} ${fontSize}px Arial`; context.textAlign = 'center'; context.textBaseline = 'middle'; const centerX = canvas.width / 2; const centerY = canvas.height / 2; context.lineWidth = outlineWidth * 2; context.strokeStyle = outlineColor; context.strokeText(text, centerX, centerY); context.fillStyle = textColorCss; context.fillText(text, centerX, centerY); const texture = new THREE.CanvasTexture(canvas); texture.needsUpdate = true; const spriteMaterial = new THREE.SpriteMaterial({ map: texture }); const sprite = new THREE.Sprite(spriteMaterial); const baseScale = 8; const aspect = canvas.width / canvas.height; sprite.scale.set(baseScale * aspect, baseScale, 1.0); return sprite; }
+             function updateGraph() { while (peopleGroup.children.length) { peopleGroup.remove(peopleGroup.children[0]); } people.forEach(person => createPersonPoint(person)); }
+             function onWindowResize() { if (graphContainer && graphContainer.clientWidth > 0 && graphContainer.clientHeight > 0) { resizeGraphCanvas(); } }
+             function resizeGraphCanvas() { if (camera && renderer && graphContainer && graphContainer.clientWidth > 0 && graphContainer.clientHeight > 0) { const width = graphContainer.clientWidth; const height = graphContainer.clientHeight; camera.aspect = width / height; camera.updateProjectionMatrix(); renderer.setSize(width, height); } }
+             function animate() { requestAnimationFrame(animate); if (controls) controls.update(); if (renderer && scene && camera) { updateAxisLabelPositions(); renderer.render(scene, camera); } }
+
+
+            // --- Data Fetching and Syncing ---
+            async function fetchPeople() {
+                if (!supabase) return; // Double check client exists
+                setLoading(true);
+                console.log("Fetching people from Supabase...");
+                try {
+                    const { data, error } = await supabase.from('people').select('*').order('created_at', { ascending: true });
+                    if (error) { throw error; }
+                    people = data.map(dbPerson => ({ id: dbPerson.id, name: dbPerson.name, scores: { x: dbPerson.score_x, y: dbPerson.score_y, z: dbPerson.score_z } }));
+                    console.log(`Fetched ${people.length} people.`);
+                    updateGraph();
+                    updateListView(); // Update UI after successful fetch
+                } catch (error) {
+                    console.error("Error fetching people:", error.message);
+                    // Show error to user temporarily
+                     if(errorMessageContainer) { // Check element exists
+                         errorMessageContainer.textContent = `Error fetching data: ${error.message}. Data might be stale.`;
+                         errorMessageContainer.style.display = 'block';
+                         setTimeout(() => { errorMessageContainer.style.display = 'none'; }, 5000); // Hide error after 5s
+                    }
+                 } finally {
+                    setLoading(false);
+                 }
+            }
+
+            // --- Application Logic (Supabase aware) ---
+             function generateScoreInputs() { scoreInputsContainer.innerHTML = ''; ['x', 'y', 'z'].forEach(axis => { const traitName = traitNames[axis]; const div = document.createElement('div'); const label = document.createElement('label'); label.htmlFor = `person-score-${axis}`; label.textContent = `${traitName} (${scoreMin}-${scoreMax}):`; const input = document.createElement('input'); input.type = 'number'; input.id = `person-score-${axis}`; input.min = scoreMin; input.max = scoreMax; input.placeholder = scoreMin + '-' + scoreMax; input.required = true; input.dataset.axis = axis; div.appendChild(label); div.appendChild(input); scoreInputsContainer.appendChild(div); }); }
+             function updateTraitNames() { const newX = traitXInput.value.trim() || 'X-Axis'; const newY = traitYInput.value.trim() || 'Y-Axis'; const newZ = traitZInput.value.trim() || 'Z-Axis'; traitNames.x = newX; traitNames.y = newY; traitNames.z = newZ; generateScoreInputs(); listHeaderX.textContent = traitNames.x; listHeaderY.textContent = traitNames.y; listHeaderZ.textContent = traitNames.z; createAxes(); updateListView(); }
+             function validateScore(inputElement) { const value = inputElement.value; if (value === '') return false; const num = parseFloat(value); if (isNaN(num) || num < scoreMin || num > scoreMax) { inputElement.classList.add('invalid'); return false; } inputElement.classList.remove('invalid'); return true; }
+             function validateName(inputElement) { if (!inputElement.value.trim()) { inputElement.classList.add('invalid'); return false; } inputElement.classList.remove('invalid'); return true; }
+             function escapeHTML(str) { return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;'); }
+
+            async function addPerson() {
+                if (!supabase) return;
+                addErrorSpan.textContent = ''; let isValid = true; isValid = validateName(personNameInput) && isValid; const scores = {}; const scoreInputElements = scoreInputsContainer.querySelectorAll('input[type="number"]'); scoreInputElements.forEach(input => { isValid = validateScore(input) && isValid; if(isValid) { scores[input.dataset.axis] = parseFloat(input.value); } });
+                if (!isValid) { addErrorSpan.textContent = 'Please fix the errors above.'; return; }
+                const newPersonData = { name: personNameInput.value.trim(), score_x: scores.x, score_y: scores.y, score_z: scores.z };
+                setLoading(true);
+                try {
+                    const { data, error } = await supabase.from('people').insert([newPersonData]);
+                    if (error) { throw error; }
+                    console.log("Person added successfully:", data);
+                    personNameInput.value = ''; scoreInputElements.forEach(input => input.value = ''); personNameInput.classList.remove('invalid'); personNameInput.focus();
+                    await fetchPeople(); // Refresh data
+                } catch (error) { console.error("Error adding person:", error); addErrorSpan.textContent = `Error: ${error.message}`; }
+                finally { setLoading(false); }
+            }
+
+             function updateListView() {
+                 if (!peopleListDiv) return; // Guard if called too early somehow
+                peopleListDiv.innerHTML = '';
+                 if (!Array.isArray(people)) { console.error("Cannot update list view, people data is invalid:", people); return; }
+                people.forEach(person => {
+                    if (!person || typeof person.scores !== 'object') { console.warn("Skipping invalid person object in list view:", person); return; }
+                     const item = document.createElement('div'); item.className = 'list-item'; item.dataset.id = person.id;
+                     const personColor = getCssColorFromScores(person.scores);
+                     item.innerHTML = `<span><span class="list-name-color-swatch" style="background-color: ${personColor};"></span>${escapeHTML(person.name)}</span> <span>${person.scores.x}</span> <span>${person.scores.y}</span> <span>${person.scores.z}</span> <span class="actions"><button class="edit-btn">Edit</button><button class="delete-btn secondary">Delete</button></span>`;
+                    peopleListDiv.appendChild(item);
+                 });
+                 // Add listeners *after* elements are created
+                 peopleListDiv.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', handleEdit));
+                 peopleListDiv.querySelectorAll('.delete-btn').forEach(btn => btn.addEventListener('click', handleDelete));
+            }
+
+             function handleEdit(event) {
+                const button = event.target; const item = button.closest('.list-item'); if (!item || !item.dataset.id) return; const personId = parseInt(item.dataset.id); const person = people.find(p => p.id === personId); if (!person) return;
+                 const personColor = getCssColorFromScores(person.scores);
+                 item.innerHTML = `<span><span class="list-name-color-swatch" style="background-color: ${personColor};"></span><input type="text" class="edit-name" value="${escapeHTML(person.name)}" required style="width: calc(90% - 20px);"></span><span><input type="number" class="edit-score-x" value="${person.scores.x}" min="${scoreMin}" max="${scoreMax}" required></span><span><input type="number" class="edit-score-y" value="${person.scores.y}" min="${scoreMin}" max="${scoreMax}" required></span><span><input type="number" class="edit-score-z" value="${person.scores.z}" min="${scoreMin}" max="${scoreMax}" required></span><span class="actions"><button class="save-btn">Save</button><button class="cancel-btn secondary">Cancel</button></span>`;
+                item.querySelector('.save-btn').addEventListener('click', handleSave); item.querySelector('.cancel-btn').addEventListener('click', handleCancel); item.querySelector('.edit-name').focus();
+            }
+
+             async function handleSave(event) {
+                if (!supabase) return;
+                const button = event.target; const item = button.closest('.list-item'); if (!item || !item.dataset.id) return; const personId = parseInt(item.dataset.id);
+                 const nameInput = item.querySelector('.edit-name'); const scoreXInput = item.querySelector('.edit-score-x'); const scoreYInput = item.querySelector('.edit-score-y'); const scoreZInput = item.querySelector('.edit-score-z');
+                 let isValid = true; let validationError = false; if (!validateName(nameInput)) { isValid = false; validationError = true; } if (!validateScore(scoreXInput)) { isValid = false; validationError = true; } if (!validateScore(scoreYInput)) { isValid = false; validationError = true; } if (!validateScore(scoreZInput)) { isValid = false; validationError = true; }
+                if (!isValid) { if (validationError && !item.querySelector('.edit-error')) { const errSpan = document.createElement('span'); errSpan.textContent = 'Invalid'; errSpan.style.color = 'var(--error-color)'; errSpan.style.fontSize = '0.8em'; errSpan.classList.add('edit-error'); item.querySelector('.actions').prepend(errSpan); } return; }
+                const updatedData = { name: nameInput.value.trim(), score_x: parseFloat(scoreXInput.value), score_y: parseFloat(scoreYInput.value), score_z: parseFloat(scoreZInput.value) };
+                setLoading(true);
+                try {
+                     const { data, error } = await supabase.from('people').update(updatedData).eq('id', personId);
+                    if (error) { throw error; }
+                     console.log("Update successful:", data);
+                     await fetchPeople(); // Refresh data
+                 } catch(error) {
+                    console.error(`Error updating person ID ${personId}:`, error);
+                    // Show temporary error in UI instead of alert
+                    const tempErrorSpan = document.createElement('span'); tempErrorSpan.textContent = ' Save Failed!'; tempErrorSpan.style.color = 'var(--error-color)'; tempErrorSpan.style.fontSize = '0.8em'; button.parentNode.prepend(tempErrorSpan); setTimeout(() => tempErrorSpan.remove(), 3000);
+                     // updateListView(); // Optionally redraw to cancel edit visually
+                } finally { setLoading(false); }
+             }
+
+            function handleCancel(event) { updateListView(); } // Redraw based on current local state
+
+             async function handleDelete(event) {
+                if (!supabase) return;
+                const button = event.target; const item = button.closest('.list-item'); if (!item || !item.dataset.id) return; const personId = parseInt(item.dataset.id);
+                 const person = people.find(p => p.id === personId); // For confirm message
+                 if (confirm(`Are you sure you want to delete ${person ? person.name : 'this person'}?`)) {
+                    setLoading(true);
+                    try {
+                         const { data, error } = await supabase.from('people').delete().eq('id', personId);
+                         if (error) { throw error; }
+                         console.log("Delete successful:", data);
+                         await fetchPeople(); // Refresh data
+                     } catch(error) { console.error(`Error deleting person ID ${personId}:`, error); alert(`Failed to delete person: ${error.message}`); }
+                     finally { setLoading(false); }
+                 }
+             }
+
+            // --- Resizable Sections Logic (unchanged) ---
+            function makeResizable(splitterElement, elementAbove, elementBelow) { let mouseY, elementAboveHeight, elementBelowHeight; let elementAboveMinHeight = parseInt(elementAbove.dataset.minHeight) || 50; let elementBelowMinHeight = parseInt(elementBelow.dataset.minHeight) || 50; function onMouseDown(e) { e.preventDefault(); mouseY = e.clientY; elementAboveHeight = elementAbove.offsetHeight; elementBelowHeight = elementBelow.offsetHeight; document.addEventListener('mousemove', onMouseMove); document.addEventListener('mouseup', onMouseUp); document.body.style.cursor = 'ns-resize'; mainContainer.style.userSelect = 'none'; } function onMouseMove(e) { const dy = e.clientY - mouseY; let newAboveHeight = elementAboveHeight + dy; let newBelowHeight = elementBelowHeight - dy; if (newAboveHeight < elementAboveMinHeight) { newAboveHeight = elementAboveMinHeight; newBelowHeight = elementAboveHeight + elementBelowHeight - elementAboveMinHeight; } if (newBelowHeight < elementBelowMinHeight) { newBelowHeight = elementBelowMinHeight; newAboveHeight = elementAboveHeight + elementBelowHeight - elementBelowMinHeight; } elementAbove.style.flexBasis = `${newAboveHeight}px`; elementBelow.style.flexBasis = `${newBelowHeight}px`; elementAbove.style.flexGrow = '0'; elementBelow.style.flexGrow = '0'; if ((elementAbove === graphContainer || elementBelow === graphContainer) && graphContainer.clientWidth > 0 && graphContainer.clientHeight > 0) { resizeGraphCanvas(); } } function onMouseUp() { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp); elementAbove.style.flexGrow = ''; elementBelow.style.flexGrow = ''; document.body.style.cursor = 'default'; mainContainer.style.userSelect = 'auto'; if ((elementAbove === graphContainer || elementBelow === graphContainer) && graphContainer.clientWidth > 0 && graphContainer.clientHeight > 0) { resizeGraphCanvas(); } } splitterElement.addEventListener('mousedown', onMouseDown); }
+
+
+            // --- Initial Setup & Event Listeners ---
+             traitXInput.value = traitNames.x; traitYInput.value = traitNames.y; traitZInput.value = traitNames.z;
+             generateScoreInputs();
+            addPersonBtn.addEventListener('click', addPerson);
+             updateTraitsBtn.addEventListener('click', updateTraitNames);
+            scoreInputsContainer.addEventListener('keypress', (event) => { if (event.key === 'Enter' && event.target.type === 'number') { const inputs = Array.from(scoreInputsContainer.querySelectorAll('input[type="number"]')); if (event.target === inputs[inputs.length - 1]) { addPerson(); } } });
+            personNameInput.addEventListener('keypress', (event) => { if (event.key === 'Enter') { const firstScoreInput = scoreInputsContainer.querySelector('input[type="number"]'); if (firstScoreInput) firstScoreInput.focus(); } });
+
+             // --- Initialize Components & Fetch Initial Data ---
+             init3D(); // Initialize Three.js
+            makeResizable(splitter1, controlsArea, graphContainer); // Initialize resizers
+            makeResizable(splitter2, graphContainer, listContainer);
+             fetchPeople(); // Fetch initial data *after* basic UI/3D setup
+
+            // Initial graph resize
+             requestAnimationFrame(() => { requestAnimationFrame(() => { resizeGraphCanvas(); }); });
+
+        }); // End DOMContentLoaded listener
+
+    </script>
+
+</body>
+</html>
